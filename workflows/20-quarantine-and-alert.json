@@ -1,0 +1,165 @@
+{
+  "id": "KRTNj2ZJmaF6lcEt",
+  "name": "Clearwater · 20 Quarantine and alert",
+  "active": true,
+  "nodes": [
+    {
+      "id": "3fc730ff-d0c3-4b74-82ce-c86636292444",
+      "name": "When another workflow crashes",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -260,
+        -120
+      ],
+      "parameters": {},
+      "notes": "The last-resort net. Set this workflow as the Error Workflow on every other Clearwater workflow, and anything unexpected lands here instead of vanishing."
+    },
+    {
+      "id": "99584bc4-c98a-4222-bc65-17c14b03d482",
+      "name": "When a lead is quarantined",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -260,
+        80
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "notes": "Called on purpose by the pipeline when it knows a lead cannot go on: no email address, scoring failed, HubSpot refused. Carries the lead itself, which the crash path cannot."
+    },
+    {
+      "id": "e35b7da6-34c3-4e17-86a2-46ead611e067",
+      "name": "Describe the failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -20,
+        -20
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// One shape out, whichever trigger fired.\n//\n// The two paths carry different things: a crash knows the workflow and the\n// execution, a deliberate quarantine knows the lead. The sheet has one set of\n// columns, so both are flattened here rather than in two Sheets nodes.\n//\n// The keys below MUST match the Quarantine tab's headers exactly - the Sheets\n// node maps them by name.\n\nconst rows = [];\n\nfor (const item of $input.all()) {\n  // A caller that points a webhook straight at this workflow sends the whole\n  // HTTP envelope, with the real payload under `body`. Unwrap it, so the\n  // quarantine works whether it is called by a workflow or by an HTTP request.\n  const raw = item.json || {};\n  const j = raw.body && typeof raw.body === 'object' ? raw.body : raw;\n  const crashed = Boolean(j.execution && j.workflow);\n\n  if (crashed) {\n    // n8n's Error Trigger payload.\n    const error = j.execution.error || {};\n    rows.push({\n      failed_at: new Date().toISOString(),\n      source: `crash in \"${j.workflow.name || 'unknown workflow'}\"`,\n      email: '',\n      company: '',\n      // n8n reports the failing node as `lastNodeExecuted`; `error.node` is not\n      // always present, so both are tried before giving up.\n      failed_step: j.execution.lastNodeExecuted || error.node?.name || 'unknown step',\n      error: String(error.message || 'no message').slice(0, 500),\n      // The execution link is the fastest way back to what actually happened.\n      raw_payload: j.execution.url || `execution ${j.execution.id || '?'}`,\n      status: 'new',\n    });\n    continue;\n  }\n\n  // Called by the pipeline, so the lead itself is here.\n  const lead = j.lead || j;\n  rows.push({\n    failed_at: new Date().toISOString(),\n    source: j.source || lead.source || 'unknown',\n    email: lead.email || '',\n    company: lead.company || '',\n    failed_step: j.failed_step || 'unknown step',\n    error: String(j.error || 'no reason given').slice(0, 500),\n    // Everything we received, so a human can replay the lead by hand.\n    raw_payload: JSON.stringify(j.raw_payload || lead).slice(0, 4000),\n    status: 'new',\n  });\n}\n\nreturn rows.map((json) => ({ json }));"
+      },
+      "notes": "Flattens both trigger shapes into the Quarantine tab's columns."
+    },
+    {
+      "id": "76867a84-f131-4352-8e1a-8dd34188b1ef",
+      "name": "Write to the Quarantine tab",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        220,
+        -20
+      ],
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1dxbgI6ncxODw_r9DmxpMldxNSMuTtSyL1GNc976tQ8o"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Quarantine"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "8eI3u6QwX5piR4pR",
+          "name": "Clearwater Google Sheets"
+        }
+      },
+      "notes": "Append only - a quarantined lead is a record, never overwritten. Columns are matched to the headers by name."
+    },
+    {
+      "id": "58473079-c063-41ab-be60-9c8687f6a634",
+      "name": "Alert the owner",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        460,
+        -20
+      ],
+      "parameters": {
+        "chatId": "636094075",
+        "text": "=⚠️ <b>Lead needs attention</b>\n\nA lead could not be processed and is waiting in the Quarantine sheet.\n\n<b>Where:</b> {{ $json.source }}\n<b>Step:</b> {{ $json.failed_step }}\n<b>Error:</b> {{ $json.error }}\n{{ $json.email ? '<b>Lead:</b> ' + $json.email : '' }}\n\nNothing has been lost - open the Quarantine tab to deal with it.",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "tZiGZMjTYIbr0rEc",
+          "name": "Clearwater Leads Bot"
+        }
+      },
+      "notes": "A quarantine alert always fires, whatever the tier. Silence here would mean a lost lead nobody knew about.",
+      "webhookId": "36badadb-f7f0-4213-8f80-eee7bc030411"
+    }
+  ],
+  "connections": {
+    "When another workflow crashes": {
+      "main": [
+        [
+          {
+            "node": "Describe the failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When a lead is quarantined": {
+      "main": [
+        [
+          {
+            "node": "Describe the failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Describe the failure": {
+      "main": [
+        [
+          {
+            "node": "Write to the Quarantine tab",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write to the Quarantine tab": {
+      "main": [
+        [
+          {
+            "node": "Alert the owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Los_Angeles",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "nodeGroups": [],
+  "tags": []
+}

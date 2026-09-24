@@ -1,0 +1,89 @@
+CLEARWATER COMMERCIAL CLEANING - LEAD SCORING CRITERIA
+Last updated: 22 September 2026
+
+This is the text the AI reads before scoring every lead. It is written in plain
+English on purpose: change it and the next lead is scored by the new rules, with
+nobody touching the automation.
+
+This file is the template. The live copy is the Google Doc
+"Clearwater - Lead Scoring Criteria", which the workflow reads on every run.
+
+------------------------------------------------------------------------------
+WHAT WE DO
+------------------------------------------------------------------------------
+
+We clean offices and commercial premises in the Portland, Oregon metro area.
+Our work is recurring contracts - nightly, three times a week, or weekly. One-off
+cleans are accepted only when they may lead to a contract.
+
+We do not clean private homes or apartments.
+
+------------------------------------------------------------------------------
+WHAT MAKES A LEAD HOT (score 8-10)
+------------------------------------------------------------------------------
+
+• A business, not a private individual.
+• Premises over 5,000 sq ft, or more than 20 staff.
+• Wants recurring cleaning, not a one-off.
+• In the Portland metro area (including Beaverton, Hillsboro, Gresham, Lake Oswego,
+  Tigard, Vancouver WA).
+• Wants to start within 30 days.
+• Names a budget, or asks for a walkthrough or a quote.
+
+A lead that ticks most of these is hot even if one detail is missing.
+
+------------------------------------------------------------------------------
+WHAT MAKES A LEAD WARM (score 5-7)
+------------------------------------------------------------------------------
+
+• A business, but smaller premises (1,000-5,000 sq ft).
+• Interested in recurring cleaning but has no firm start date.
+• "Getting quotes", comparing suppliers, or planning next quarter's budget.
+• In the service area but vague about what they need.
+• A large one-off job (a post-construction or move-out clean of commercial premises)
+  that could become a contract.
+
+------------------------------------------------------------------------------
+WHAT MAKES A LEAD COLD (score 1-4)
+------------------------------------------------------------------------------
+
+• Private homes, apartments or domestic cleaning of any kind.
+• Outside the Portland metro area with no plans to open here.
+• Job seekers asking about work, and anyone selling us something.
+• A one-off clean of a small space with no interest in anything further.
+• Too vague to act on: no company, no location, no indication of what is needed.
+
+------------------------------------------------------------------------------
+TIER THRESHOLDS
+------------------------------------------------------------------------------
+
+score 8, 9, 10  = hot
+score 5, 6, 7   = warm
+score 1, 2, 3, 4 = cold
+
+If the score and the tier ever disagree, the score wins.
+
+------------------------------------------------------------------------------
+THIS QUARTER'S PRIORITY
+------------------------------------------------------------------------------
+
+(Edit this section as priorities change - it is the fastest way to steer the scoring.)
+
+Nothing special this quarter. Score on the rules above.
+------------------------------------------------------------------------------
+HOW TO WRITE THE REASON
+------------------------------------------------------------------------------
+
+Every score comes with one sentence explaining it. Quote real details from the
+lead, so whoever picks it up can judge it without opening the CRM.
+
+Never invent facts about a lead. If the lead says nothing about size, do not guess
+a size. Score what is actually there, and say what is missing.
+
+------------------------------------------------------------------------------
+NOTE ON THE OUTPUT FORMAT
+------------------------------------------------------------------------------
+
+The JSON shape the AI must return is set in the workflow's prompt, not here.
+That is deliberate: a client editing their criteria cannot accidentally break the
+format and stop the pipeline.

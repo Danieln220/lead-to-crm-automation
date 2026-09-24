@@ -1,0 +1,15 @@
+# Secrets
+.env
+
+# Node / n8n local data
+node_modules/
+.n8n/
+
+# OS / editor
+.DS_Store
+.vscode/
+
+# Kept private: the build plan and, later, the demo script and handover template
+PLAN.md
+DEMO.md
+HANDOFF.md

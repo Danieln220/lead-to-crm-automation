@@ -1,0 +1,459 @@
+{
+  "id": "g5GXZ8LfKYlS1WnF",
+  "name": "Clearwater · 10 Process lead",
+  "active": true,
+  "nodes": [
+    {
+      "id": "c77b72a1-add4-4606-959e-c20e7089b4cd",
+      "name": "When a lead arrives",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -620,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "notes": "Called by each source workflow (form, Gmail, webhook) with one normalised lead. All the thinking lives here so the sources stay thin."
+    },
+    {
+      "id": "6faace6c-d163-4f78-ad91-1939948e01ff",
+      "name": "Settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -400,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "s1",
+              "name": "criteria_doc_id",
+              "value": "17x07fwgUzT3-4DgVGyFl998HxUs8yK-0pTqVmkHF3Ho",
+              "type": "string"
+            },
+            {
+              "id": "s2",
+              "name": "sheet_id",
+              "value": "1dxbgI6ncxODw_r9DmxpMldxNSMuTtSyL1GNc976tQ8o",
+              "type": "string"
+            },
+            {
+              "id": "s3",
+              "name": "telegram_chat_id",
+              "value": "636094075",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "notes": "Everything that changes per client, in one visible place. n8n blocks environment variables inside nodes by default, and a Config node is easier to hand over than a hidden file."
+    },
+    {
+      "id": "a6ff7fe1-d6cb-4147-96d7-524eb23eb459",
+      "name": "Check the lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -180,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Tidy the lead and decide whether it can go any further.\n//\n// The email address is the one field the pipeline cannot work without: it is\n// how a lead is deduplicated against the CRM and how anyone replies. A lead\n// without one is not dropped - it goes to quarantine for a human.\n\nconst EMAIL = /^[^@\\s]+@[^@\\s.]+\\.[^@\\s]+$/;\n\nreturn $input.all().map((item) => {\n  // A caller may hand us the lead directly, or wrapped in an HTTP envelope\n  // (`body`) when something posts to this workflow over a webhook.\n  const envelope = item.json || {};\n  const raw = envelope.body && typeof envelope.body === 'object'\n    ? { ...envelope, ...envelope.body }\n    : envelope;\n  const lead = raw.lead || raw;\n\n  const email = String(lead.email || '').trim().toLowerCase();\n  const valid = EMAIL.test(email);\n\n  return {\n    json: {\n      // Settings travel with the lead so later nodes can read them.\n      criteria_doc_id: raw.criteria_doc_id,\n      sheet_id: raw.sheet_id,\n      telegram_chat_id: raw.telegram_chat_id,\n      has_email: valid,\n      lead: {\n        // n8n's Code sandbox has no `crypto`, so the id is built from the\n        // clock plus randomness - unique enough to trace one lead through\n        // the sheet, the CRM and the logs.\n        lead_id: lead.lead_id || `lead_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,\n        received_at: lead.received_at || new Date().toISOString(),\n        source: lead.source || 'unknown',\n        source_detail: lead.source_detail || '',\n        first_name: String(lead.first_name || '').trim(),\n        last_name: String(lead.last_name || '').trim(),\n        email,\n        phone: String(lead.phone || '').trim(),\n        company: String(lead.company || '').trim(),\n        website: String(lead.website || '').trim(),\n        office_size_sqft: Number(lead.office_size_sqft) || null,\n        cleaning_frequency: String(lead.cleaning_frequency || '').trim(),\n        city: String(lead.city || '').trim(),\n        message: String(lead.message || '').trim(),\n        raw: lead.raw || raw,\n      },\n    },\n  };\n});"
+      },
+      "notes": "Normalises the lead and checks the one field that cannot be missing: a usable email address."
+    },
+    {
+      "id": "201871c8-c7ad-4d15-a1f1-c716de8378f7",
+      "name": "Has an email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        40,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.has_email }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "121b3d89-704e-4569-a74b-1cafb2cdaa19",
+      "name": "Send to quarantine",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        280,
+        180
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "KRTNj2ZJmaF6lcEt"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "notes": "No email means the lead cannot be deduplicated or answered. It is recorded with everything that arrived, and the owner is alerted."
+    },
+    {
+      "id": "e504ed6b-726a-465e-8ff0-396c05c9706c",
+      "name": "Read the scoring criteria",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        280,
+        -60
+      ],
+      "parameters": {
+        "operation": "get",
+        "documentURL": "={{ $json.criteria_doc_id }}"
+      },
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "vFRyMHolrZmKj4Fg",
+          "name": "Clearwater Google Docs"
+        }
+      },
+      "notes": "Read on EVERY lead, on purpose. The owner edits the document in plain English and the next lead is scored by the new rules - no developer, no deployment."
+    },
+    {
+      "id": "f0cd92ec-15d6-4a81-bb6e-9d12e1438f71",
+      "name": "Turn the Doc into text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        -60
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Google returns a document as a tree of styled runs, not as text.\n// The model only needs the words, so the tree is flattened here.\n\nfunction toPlainText(doc) {\n  const parts = [];\n  for (const block of doc?.body?.content || []) {\n    for (const element of block.paragraph?.elements || []) {\n      if (element.textRun?.content) parts.push(element.textRun.content);\n    }\n    // A table of thresholds would otherwise vanish silently.\n    for (const row of block.table?.tableRows || []) {\n      for (const cell of row.tableCells || []) {\n        for (const inner of cell.content || []) {\n          for (const element of inner.paragraph?.elements || []) {\n            if (element.textRun?.content) parts.push(element.textRun.content);\n          }\n        }\n      }\n    }\n  }\n  return parts.join('').replace(/\\n{3,}/g, '\\n\\n').trim();\n}\n\n// n8n's Google Docs node already hands back plain text in `content`. The\n// tree-walker above is the fallback for a raw Docs API response, which is\n// what you get from an HTTP Request node instead of this one.\nconst doc = $input.first().json || {};\nconst criteria = typeof doc.content === 'string' && doc.content.trim()\n  ? doc.content.trim()\n  : toPlainText(doc);\n\nif (criteria.length < 50) {\n  // Scoring against an empty document would quietly give every lead the same\n  // score, which is worse than stopping.\n  throw new Error('The scoring criteria document is empty or could not be read.');\n}\n\n// Carry the lead forward alongside the criteria.\nreturn $('Check the lead').all().map((item) => ({\n  json: { ...item.json, criteria },\n}));"
+      },
+      "notes": "Flattens Google's document tree to plain text, and refuses to continue if the criteria are empty."
+    },
+    {
+      "id": "c764542e-873d-43a0-8d81-a4f41e462a18",
+      "name": "Score the lead",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        740,
+        -60
+      ],
+      "parameters": {
+        "promptType": "define",
+        "text": "=You score incoming sales leads for a commercial cleaning company.\n\nScore ONLY against the criteria below. They are written by the business owner and are the whole truth about what a good lead looks like. If the criteria and your instincts disagree, follow the criteria.\n\n=== SCORING CRITERIA ===\n{{ $json.criteria }}\n=== END OF CRITERIA ===\n\n=== THE LEAD ===\n{{ JSON.stringify($json.lead, null, 2) }}\n=== END OF LEAD ===\n\nRules:\n- Score 1 to 10 using the criteria's own bands.\n- The tier must match the score using the criteria's thresholds.\n- The reason is ONE sentence that quotes real details from this lead, so a salesperson can judge it without opening anything else.\n- Never invent facts. If the lead does not say how big the premises are, do not guess - score what is there and say what is missing.\n- The suggested action is one short instruction, e.g. \"Call today and offer a walkthrough\".",
+        "hasOutputParser": true,
+        "batching": {}
+      },
+      "notes": "One shot: criteria in, score out. No tools and no memory, because each lead is judged on its own.\n\nIf Groq is down or refuses, this node does NOT stop the pipeline: the lead continues as 'unscored' and still reaches the CRM. A scoring outage must never cost the business a lead.",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "6cc19165-6375-4305-9be1-2194ab9091b5",
+      "name": "Groq model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        700,
+        160
+      ],
+      "parameters": {
+        "model": "openai/gpt-oss-20b",
+        "options": {
+          "temperature": 0
+        }
+      },
+      "credentials": {
+        "groqApi": {
+          "id": "t3nHYVkwfyTP9BII",
+          "name": "Groq (Clearwater)"
+        }
+      },
+      "notes": "Temperature 0: the same lead must always get the same score, or the owner cannot trust the numbers."
+    },
+    {
+      "id": "a14d5ae8-f661-4607-ab00-777e8d934ee0",
+      "name": "Force the JSON shape",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        900,
+        160
+      ],
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"required\": [\"score\", \"tier\", \"reason\", \"suggested_next_action\"],\n  \"properties\": {\n    \"score\": {\n      \"type\": \"integer\",\n      \"minimum\": 1,\n      \"maximum\": 10,\n      \"description\": \"How good this lead is, using the criteria's bands\"\n    },\n    \"tier\": {\n      \"type\": \"string\",\n      \"enum\": [\"hot\", \"warm\", \"cold\"],\n      \"description\": \"Must match the score using the thresholds in the criteria\"\n    },\n    \"reason\": {\n      \"type\": \"string\",\n      \"description\": \"One sentence quoting real details from this lead\"\n    },\n    \"suggested_next_action\": {\n      \"type\": \"string\",\n      \"description\": \"One short instruction for whoever picks the lead up\"\n    }\n  }\n}",
+        "autoFix": true
+      },
+      "notes": "The shape is enforced here rather than trusted from the prompt. autoFix gives one repair attempt before the lead is treated as unscored."
+    },
+    {
+      "id": "37b70803-f790-4017-9db7-349648f2941d",
+      "name": "Repair model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        1080,
+        320
+      ],
+      "parameters": {
+        "model": "openai/gpt-oss-20b",
+        "options": {
+          "temperature": 0
+        }
+      },
+      "credentials": {
+        "groqApi": {
+          "id": "t3nHYVkwfyTP9BII",
+          "name": "Groq (Clearwater)"
+        }
+      },
+      "notes": "Only runs when the first reply is not valid JSON. Reconciling broken JSON against a schema is a coding task, so it gets its own call."
+    },
+    {
+      "id": "3cc88c72-f48a-4990-88d1-f3372203682d",
+      "name": "Check the score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1060,
+        -60
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Never trust the model's own arithmetic.\n//\n// The parser guarantees the SHAPE. This guarantees the MEANING: the tier is\n// recalculated from the score, so a model that says \"score 9, tier cold\"\n// cannot send a hot lead quietly into the cold pile.\n//\n// If anything is unusable, the lead still continues - marked \"unscored\" - so\n// a scoring problem never costs the business a lead.\n\nconst HOT = 8;   // thresholds live in the criteria document; these mirror it\nconst WARM = 5;\n\nfunction tierFor(score) {\n  if (score >= HOT) return 'hot';\n  if (score >= WARM) return 'warm';\n  return 'cold';\n}\n\nconst leads = $('Turn the Doc into text').all();\n\nreturn $input.all().map((item, index) => {\n  const carried = leads[index]?.json || leads[0]?.json || {};\n  const output = item.json?.output || item.json || {};\n\n  const raw = Number(output.score);\n  const usable = Number.isFinite(raw) && raw >= 1 && raw <= 10 && String(output.reason || '').trim().length > 0;\n\n  const score = usable ? Math.round(raw) : null;\n  const tier = usable ? tierFor(score) : 'unscored';\n\n  return {\n    json: {\n      ...carried,\n      scoring: {\n        score,\n        tier,\n        reason: usable ? String(output.reason).trim() : 'The scoring step did not return a usable answer.',\n        suggested_next_action: usable\n          ? String(output.suggested_next_action || 'Review this lead by hand.').trim()\n          : 'Review this lead by hand.',\n        // Recorded when the model disagreed with itself, so the owner can see\n        // how often that happens rather than guessing.\n        model_said_tier: String(output.tier || ''),\n        corrected: usable && String(output.tier || '') !== tier,\n        scored_ok: usable,\n      },\n    },\n  };\n});"
+      },
+      "notes": "The tier is recalculated from the score, and an unusable answer becomes 'unscored' rather than a lost lead."
+    },
+    {
+      "id": "01d289bd-8a6d-44c0-9ba7-39862ba9f128",
+      "name": "Say why it failed",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        280,
+        300
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "q1",
+              "name": "source",
+              "value": "={{ $json.lead.source }}{{ $json.lead.source_detail ? ' (' + $json.lead.source_detail + ')' : '' }}",
+              "type": "string"
+            },
+            {
+              "id": "q2",
+              "name": "failed_step",
+              "value": "Check the lead",
+              "type": "string"
+            },
+            {
+              "id": "q3",
+              "name": "error",
+              "value": "No usable email address, so the lead cannot be deduplicated or replied to.",
+              "type": "string"
+            },
+            {
+              "id": "q4",
+              "name": "lead",
+              "value": "={{ $json.lead }}",
+              "type": "object"
+            },
+            {
+              "id": "q5",
+              "name": "raw_payload",
+              "value": "={{ $json.lead }}",
+              "type": "object"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "notes": "The quarantine row is only useful if it says what went wrong. Without this, every rejected lead reads 'unknown step / no reason given'."
+    }
+  ],
+  "connections": {
+    "When a lead arrives": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Check the lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check the lead": {
+      "main": [
+        [
+          {
+            "node": "Has an email?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has an email?": {
+      "main": [
+        [
+          {
+            "node": "Read the scoring criteria",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Say why it failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the scoring criteria": {
+      "main": [
+        [
+          {
+            "node": "Turn the Doc into text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Turn the Doc into text": {
+      "main": [
+        [
+          {
+            "node": "Score the lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score the lead": {
+      "main": [
+        [
+          {
+            "node": "Check the score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Score the lead",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Force the JSON shape": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Score the lead",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Repair model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Force the JSON shape",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Say why it failed": {
+      "main": [
+        [
+          {
+            "node": "Send to quarantine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Los_Angeles",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "errorWorkflow": "KRTNj2ZJmaF6lcEt"
+  },
+  "nodeGroups": [],
+  "tags": []
+}

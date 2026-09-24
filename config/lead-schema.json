@@ -1,0 +1,23 @@
+{
+  "_comment": [
+    "The standard lead. Every source - the form, Gmail, the webhook - is converted",
+    "into this shape before anything else happens. That is what keeps the scoring,",
+    "deduplication, CRM and routing logic written once instead of three times.",
+    "Adding a fourth source means writing one small workflow that produces this."
+  ],
+  "lead_id": "uuid, generated when the lead arrives",
+  "received_at": "ISO 8601 timestamp",
+  "source": "form | email | webhook",
+  "source_detail": "where exactly, e.g. website-contact, facebook_ads, typeform",
+  "first_name": "string, may be empty",
+  "last_name": "string, may be empty",
+  "email": "string, lower-cased and trimmed. REQUIRED: without it a lead cannot be deduplicated or contacted, so it goes to quarantine",
+  "phone": "string, may be empty",
+  "company": "string, may be empty",
+  "website": "string, may be empty. Used by the Premium enrichment step",
+  "office_size_sqft": "number or null - one of the strongest scoring signals",
+  "cleaning_frequency": "string, e.g. nightly, 3x per week, weekly, one-off",
+  "city": "string, may be empty. Scoring cares whether it is in the Portland metro",
+  "message": "string, what they actually wrote. The AI reads this",
+  "raw": "object, the original payload exactly as it arrived - kept so a quarantined lead can be replayed by hand"
+}
