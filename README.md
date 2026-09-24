@@ -46,6 +46,7 @@ cp .env.example .env         # add the HubSpot token and a webhook key
 
 | File | What it does | Built |
 |---|---|---|
+| `03-lead-source-webhook.json` | A lead posted by an ad platform, Typeform or anything else that sends JSON. | M6 |
 | `10-process-lead.json` | The core. Normalises, scores, deduplicates into HubSpot, logs, and routes the alert. | M3-M5 |
 | `20-quarantine-and-alert.json` | The safety net. Catches a failed lead, writes it to the Quarantine tab with its raw payload, and alerts Telegram. | M2 |
 
@@ -101,6 +102,27 @@ If HubSpot refuses a contact, the lead does not vanish: the error output carries
 ```bash
 ./scripts/export-workflows.sh    # pull the workflows out of n8n into workflows/
 ```
+
+### The webhook source
+
+```bash
+./scripts/send-test-lead.sh              # hot | warm | cold | broken
+./scripts/send-test-lead.sh hot --no-key # prove the endpoint is protected
+```
+
+| What is posted | Reply |
+|---|---|
+| A usable lead with the secret header | `202 Accepted` with a `lead_id` to quote later |
+| No header, or the wrong one | `403` — n8n rejects it before any node runs |
+| A payload with no email, phone or message | `400` with the reason, **and the payload is kept in quarantine** |
+
+Three decisions worth knowing:
+
+- **The secret lives in an n8n credential, not in the workflow.** A key written into a node ends up in the exported JSON, and then in git. n8n checks the header itself and answers `403` before the workflow starts, so a stranger who finds the URL never reaches a single node.
+- **The reply does not wait for the pipeline.** The sender gets its `202` immediately while scoring and the CRM happen behind it. An ad platform kept waiting starts retrying, and you get the same lead three times.
+- **`400` rather than a polite `200`** for an unusable payload. A broken integration should be loud on the sender's side; a 200 lets a misconfigured form post nothing for weeks unnoticed.
+
+Adding a fourth source means copying one node — "Read the lead", which maps that platform's field names — and nothing else.
 
 ## What's in here
 

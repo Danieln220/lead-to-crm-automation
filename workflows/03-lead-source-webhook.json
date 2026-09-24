@@ -1,0 +1,309 @@
+{
+  "id": "vaFZdjBu8n2YkZck",
+  "name": "Clearwater · 03 Lead source - webhook",
+  "active": true,
+  "nodes": [
+    {
+      "id": "97a75288-a5f1-47ad-be23-a0deb63845d0",
+      "name": "Lead posted by another system",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -600,
+        0
+      ],
+      "parameters": {
+        "path": "clearwater-lead",
+        "httpMethod": "POST",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7WJ5BlLqH3PqwYFT",
+          "name": "Clearwater webhook key"
+        }
+      },
+      "notes": "Stands in for an ad platform, Typeform, or anything else that can post JSON.\n\nThe shared secret is checked by n8n against a credential, not by a node in this workflow: a key written into the workflow would end up in the exported JSON and then in git.",
+      "webhookId": "a2508cdd-5aae-4f73-b9ea-49b9a7d9e34a"
+    },
+    {
+      "id": "8b01c88b-ae2d-491f-a86e-ce710c47f657",
+      "name": "Read the lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -360,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Turn whatever this platform sends into the standard lead.\n//\n// Every source has its own field names - one calls it `full_name`, another\n// `name`, a third splits it in two. Mapping them here is the whole job of a\n// source workflow: everything downstream sees one shape.\n\nfunction pick(source, ...names) {\n  for (const name of names) {\n    const value = source[name];\n    if (value !== undefined && value !== null && String(value).trim() !== '') {\n      return String(value).trim();\n    }\n  }\n  return '';\n}\n\nreturn $input.all().map((item) => {\n  const body = item.json.body || {};\n\n  // Some platforms send one name field, some send two.\n  const fullName = pick(body, 'full_name', 'fullName', 'name');\n  const [firstFromFull, ...restOfFull] = fullName.split(/\\s+/);\n\n  const sizeText = pick(body, 'office_size_sqft', 'square_feet', 'sqft', 'size');\n\n  const lead = {\n    // Generated HERE, not in the pipeline, so the 202 reply can carry it.\n    // The sender can then quote it when asking \"what happened to my lead?\".\n    lead_id: `lead_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,\n    received_at: new Date().toISOString(),\n    source: 'webhook',\n    // Which platform posted it. Useful in the weekly summary: \"Facebook 12,\n    // Google 3\" tells the owner where to spend next month.\n    source_detail: pick(body, 'source', 'platform', 'campaign') || 'unknown',\n    first_name: pick(body, 'first_name', 'firstName') || firstFromFull || '',\n    last_name: pick(body, 'last_name', 'lastName') || restOfFull.join(' '),\n    email: pick(body, 'email', 'email_address', 'e-mail').toLowerCase(),\n    phone: pick(body, 'phone', 'phone_number', 'telephone'),\n    company: pick(body, 'company', 'company_name', 'organisation', 'organization'),\n    website: pick(body, 'website', 'company_website', 'url'),\n    office_size_sqft: Number(String(sizeText).replace(/[^0-9.]/g, '')) || null,\n    cleaning_frequency: pick(body, 'cleaning_frequency', 'frequency', 'how_often'),\n    city: pick(body, 'city', 'town', 'location'),\n    message: pick(body, 'message', 'comments', 'notes', 'enquiry', 'inquiry'),\n    raw: body,\n  };\n\n  // A payload with neither an email nor anything to read is not a lead: it is\n  // a misconfigured integration, and the sender deserves a 400 rather than a\n  // cheerful 202 that hides the problem.\n  const usable = Boolean(lead.email || lead.phone || lead.message);\n\n  return { json: { usable, lead } };\n});"
+      },
+      "notes": "Maps this platform's field names onto the standard lead. A new source means a new copy of THIS node, and nothing else changes."
+    },
+    {
+      "id": "72469f37-c6de-42ef-b701-92d0f4f4cccd",
+      "name": "Anything to work with?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -120,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "u1",
+              "leftValue": "={{ $json.usable }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c1fd910a-5887-42ed-9d10-a75f6a289575",
+      "name": "Hand it to the pipeline",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        140,
+        -120
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "g5GXZ8LfKYlS1WnF"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "notes": "Does NOT wait for the pipeline to finish. The sender gets its 202 immediately; scoring and the CRM happen behind it. An ad platform that waits three seconds for a reply starts retrying."
+    },
+    {
+      "id": "c13939b0-f0df-4d7d-a11c-202d18d627d4",
+      "name": "Reply: accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        380,
+        -120
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ accepted: true, lead_id: $('Read the lead').item.json.lead.lead_id || null, message: 'Lead accepted for processing.' }) }}",
+        "options": {
+          "responseCode": 202
+        }
+      },
+      "notes": "202 Accepted, not 200 OK: the lead has been taken, but the work is not finished yet. Ad platforms treat both as success and stop retrying."
+    },
+    {
+      "id": "4d6f0aa2-34ea-434f-ba09-7d41e0e1105a",
+      "name": "Say it was unusable",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        140,
+        140
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "w1",
+              "name": "source",
+              "value": "webhook",
+              "type": "string"
+            },
+            {
+              "id": "w2",
+              "name": "failed_step",
+              "value": "Read the lead",
+              "type": "string"
+            },
+            {
+              "id": "w3",
+              "name": "error",
+              "value": "The posted payload had no email, phone or message - nothing to contact or judge.",
+              "type": "string"
+            },
+            {
+              "id": "w4",
+              "name": "lead",
+              "value": "={{ $json.lead }}",
+              "type": "object"
+            },
+            {
+              "id": "w5",
+              "name": "raw_payload",
+              "value": "={{ $json.lead.raw }}",
+              "type": "object"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "2703a4ce-2ff9-443c-bfb2-6d2eb9e0c77a",
+      "name": "Send to quarantine",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        380,
+        140
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "KRTNj2ZJmaF6lcEt"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "notes": "Even a rejected payload is kept. A silently discarded lead is the failure this whole project exists to prevent."
+    },
+    {
+      "id": "f3d190c1-e939-4476-b6fe-37bf54edbf69",
+      "name": "Reply: not a usable lead",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        620,
+        140
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ accepted: false, message: 'No email, phone or message in the payload. It has been recorded for review.' }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "notes": "400 tells whoever is sending that their integration is wrong. A 200 here would let a broken form post nothing for weeks unnoticed."
+    }
+  ],
+  "connections": {
+    "Lead posted by another system": {
+      "main": [
+        [
+          {
+            "node": "Read the lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the lead": {
+      "main": [
+        [
+          {
+            "node": "Anything to work with?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anything to work with?": {
+      "main": [
+        [
+          {
+            "node": "Hand it to the pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Say it was unusable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hand it to the pipeline": {
+      "main": [
+        [
+          {
+            "node": "Reply: accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Say it was unusable": {
+      "main": [
+        [
+          {
+            "node": "Send to quarantine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to quarantine": {
+      "main": [
+        [
+          {
+            "node": "Reply: not a usable lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Los_Angeles",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "errorWorkflow": "KRTNj2ZJmaF6lcEt"
+  },
+  "nodeGroups": [],
+  "tags": []
+}
