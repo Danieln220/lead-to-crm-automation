@@ -46,6 +46,12 @@
               "name": "telegram_chat_id",
               "value": "636094075",
               "type": "string"
+            },
+            {
+              "id": "s4",
+              "name": "hubspot_portal_id",
+              "value": "247495026",
+              "type": "string"
             }
           ]
         },
@@ -535,6 +541,142 @@
         "mode": "runOnceForAllItems",
         "jsCode": "// One row per lead, with keys named exactly like the Lead Log headers so the\n// Sheets node can map them by name. Doing it here rather than in the Sheets\n// node keeps the column list readable and diffable.\n\nreturn $('Is this a returning lead?').all().map((item) => {\n  const { lead, scoring, crm } = item.json;\n  return {\n    json: {\n      received_at: lead.received_at,\n      lead_id: lead.lead_id,\n      source: lead.source,\n      source_detail: lead.source_detail,\n      first_name: lead.first_name,\n      last_name: lead.last_name,\n      email: lead.email,\n      phone: lead.phone,\n      company: lead.company,\n      city: lead.city,\n      // Numbers are written as numbers: the weekly summary adds them up.\n      office_size_sqft: lead.office_size_sqft ?? '',\n      tier: scoring.tier + (crm?.returning ? ' (returning)' : ''),\n      score: scoring.score ?? '',\n      reason: scoring.reason,\n    },\n  };\n});"
       }
+    },
+    {
+      "id": "27bd8239-c6d4-4bef-bf86-06c0fef7ee47",
+      "name": "Who needs to know?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        2200,
+        -260
+      ],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": false,
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "r1",
+                    "leftValue": "={{ $('Is this a returning lead?').item.json.scoring.tier }}",
+                    "rightValue": "hot",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "hot"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": false,
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "r2",
+                    "leftValue": "={{ $('Is this a returning lead?').item.json.scoring.tier }}",
+                    "rightValue": "unscored",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "unscored"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "warm or cold"
+        }
+      },
+      "notes": "Only two things interrupt a person: a hot lead, and a lead the AI could not score. Warm and cold sit in the CRM.\n\nThe fallback output is set deliberately - without it, an unmatched lead would be silently dropped here."
+    },
+    {
+      "id": "f2658acb-ae8b-40b2-90ae-afccbca1ea47",
+      "name": "Alert: hot lead",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2460,
+        -400
+      ],
+      "parameters": {
+        "chatId": "={{ $('Settings').item.json.telegram_chat_id }}",
+        "text": "={{ $('Is this a returning lead?').item.json.crm.returning ? '🔁 <b>RETURNING LEAD</b> - they have contacted you before\\n\\n' : '' }}🔥 <b>HOT LEAD - {{ $('Is this a returning lead?').item.json.scoring.score }}/10</b>\n\n<b>{{ $('Is this a returning lead?').item.json.lead.first_name }} {{ $('Is this a returning lead?').item.json.lead.last_name }}</b>{{ $('Is this a returning lead?').item.json.lead.company ? ', ' + $('Is this a returning lead?').item.json.lead.company : '' }}\n{{ [$('Is this a returning lead?').item.json.lead.office_size_sqft ? $('Is this a returning lead?').item.json.lead.office_size_sqft.toLocaleString() + ' sq ft' : '', $('Is this a returning lead?').item.json.lead.cleaning_frequency, $('Is this a returning lead?').item.json.lead.city].filter(Boolean).join(' · ') }}\n\n<b>Why:</b> {{ $('Is this a returning lead?').item.json.scoring.reason }}\n<b>Next:</b> {{ $('Is this a returning lead?').item.json.scoring.suggested_next_action }}\n\n📧 {{ $('Is this a returning lead?').item.json.lead.email }}{{ $('Is this a returning lead?').item.json.lead.phone ? '\\n📞 ' + $('Is this a returning lead?').item.json.lead.phone : '' }}\n\n<a href=\"https://app.hubspot.com/contacts/{{ $('Settings').item.json.hubspot_portal_id }}/record/0-1/{{ $('Save to HubSpot').item.json.id || $('Save to HubSpot').item.json.vid }}\">Open in HubSpot</a>",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "tZiGZMjTYIbr0rEc",
+          "name": "Clearwater Leads Bot"
+        }
+      },
+      "notes": "Everything needed to decide whether to pick up the phone, without opening anything: who, how big, why it scored high, and what to do next.\n\nIf Telegram is down the lead is NOT lost - it is already in the CRM, so this node continues rather than failing the run.",
+      "onError": "continueRegularOutput",
+      "webhookId": "2e34bb24-dbb3-4fe4-861a-1fb4de926a64"
+    },
+    {
+      "id": "691dff8e-b174-43d0-a39a-ce774c8c3a17",
+      "name": "Alert: needs a human",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2460,
+        -220
+      ],
+      "parameters": {
+        "chatId": "={{ $('Settings').item.json.telegram_chat_id }}",
+        "text": "=⚠️ <b>Lead saved but not scored</b>\n\n<b>{{ $('Is this a returning lead?').item.json.lead.first_name }} {{ $('Is this a returning lead?').item.json.lead.last_name }}</b>{{ $('Is this a returning lead?').item.json.lead.company ? ', ' + $('Is this a returning lead?').item.json.lead.company : '' }}\n📧 {{ $('Is this a returning lead?').item.json.lead.email }}\n\n<i>{{ $('Is this a returning lead?').item.json.lead.message.slice(0, 200) }}</i>\n\nThe scoring step could not give a usable answer, so this one needs a quick human look. It is already in HubSpot marked <b>unscored</b>.",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "tZiGZMjTYIbr0rEc",
+          "name": "Clearwater Leads Bot"
+        }
+      },
+      "notes": "A lead nobody scored is worse than a cold one: it is unknown. It reaches the CRM either way, but a person is told to look.",
+      "onError": "continueRegularOutput",
+      "webhookId": "0914aa3f-62e2-4f37-90b2-3c704ee6e2c7"
+    },
+    {
+      "id": "d7c6b5f6-1439-45f9-b46d-12978de395ca",
+      "name": "No alert needed",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2460,
+        -60
+      ],
+      "parameters": {},
+      "notes": "Warm and cold leads are in the CRM with their tier and reason, and that is all they need. An alert that fires for every lead gets muted within a week - and then the hot ones are missed too."
     }
   ],
   "connections": {
@@ -733,6 +875,42 @@
         [
           {
             "node": "Write to the Lead Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write to the Lead Log": {
+      "main": [
+        [
+          {
+            "node": "Who needs to know?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Who needs to know?": {
+      "main": [
+        [
+          {
+            "node": "Alert: hot lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert: needs a human",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No alert needed",
             "type": "main",
             "index": 0
           }
