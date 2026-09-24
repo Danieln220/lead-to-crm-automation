@@ -46,7 +46,7 @@ cp .env.example .env         # add the HubSpot token and a webhook key
 
 | File | What it does | Built |
 |---|---|---|
-| `10-process-lead.json` | The core. Normalises a lead, checks it has an email, reads the criteria Doc, scores it with Groq, and re-checks the result. | M3 |
+| `10-process-lead.json` | The core. Normalises a lead, checks it has an email, scores it against the criteria Doc, deduplicates it into HubSpot, and logs it. | M3-M4 |
 | `20-quarantine-and-alert.json` | The safety net. Catches a failed lead, writes it to the Quarantine tab with its raw payload, and alerts Telegram. | M2 |
 
 It has **two ways in**, which is the point:
@@ -63,6 +63,14 @@ Built first on purpose: every later milestone wires its failures into this, rath
 - **The tier is recalculated from the score** in code. A model that says "score 9, tier cold" cannot quietly drop a hot lead, and the disagreement is recorded.
 - **A scoring failure never costs a lead.** If Groq is down or the reply is unusable, the lead continues as `unscored` and still reaches the CRM — with an alert — rather than stopping the pipeline.
 - **Temperature 0**, so the same lead always gets the same score.
+
+### How the deduplication is guaranteed
+
+The lead is written with HubSpot's **create-or-update, keyed on email**. HubSpot treats the email address as the contact's identity, so two submissions arriving at the same moment cannot become two contacts — the guarantee is HubSpot's, not a check of ours that could race.
+
+A separate search runs first, but only to answer a different question: *have we heard from this person before?* A returning lead is a buying signal, so it is flagged rather than quietly merged. That search is deliberately **not** the dedupe, because HubSpot's search index lags a few seconds behind writes.
+
+If HubSpot refuses a contact, the lead does not vanish: the error output carries it — **with its score**, so the AI is not asked twice — into the quarantine sheet, and the row says exactly what HubSpot objected to.
 
 ```bash
 ./scripts/export-workflows.sh    # pull the workflows out of n8n into workflows/

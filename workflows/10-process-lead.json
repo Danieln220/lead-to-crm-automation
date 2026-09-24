@@ -315,6 +315,226 @@
         "options": {}
       },
       "notes": "The quarantine row is only useful if it says what went wrong. Without this, every rejected lead reads 'unknown step / no reason given'."
+    },
+    {
+      "id": "ce7777ab-036d-4784-bb4f-e3128c19dc7d",
+      "name": "Have we met before?",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2.2,
+      "position": [
+        1280,
+        -60
+      ],
+      "parameters": {
+        "authentication": "appToken",
+        "resource": "contact",
+        "operation": "search",
+        "filterGroupsUi": {
+          "filterGroupsValues": [
+            {
+              "filtersUi": {
+                "filterValues": [
+                  {
+                    "propertyName": "email",
+                    "operator": "EQ",
+                    "value": "={{ $json.lead.email }}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {},
+        "returnAll": false,
+        "limit": 1
+      },
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "ooIoh2bwqMD5I2wV",
+          "name": "Clearwater HubSpot"
+        }
+      },
+      "notes": "Only asks whether this person has contacted us before, so a returning lead can be flagged. It is NOT the deduplication: that is guaranteed by the create-or-update below, because HubSpot's search index lags a few seconds behind writes.",
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "b3c39ee4-39fe-48b5-a7be-6fe8c4a03649",
+      "name": "Is this a returning lead?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        -60
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Did HubSpot already know this email?\n//\n// A returning lead is a buying signal, not noise: someone who asked twice is\n// more interested than someone who asked once. It is flagged here so the alert\n// can say so, rather than being silently merged.\n\nconst scored = $('Check the score').all();\nconst found = $input.all();\n\nreturn scored.map((item, index) => {\n  const hit = found[index]?.json || found[0]?.json || {};\n  // The search node emits an empty item when nothing matched (alwaysOutputData),\n  // so \"has an id\" is the test, not \"has an item\".\n  const existingId = hit.id || hit.contactId || null;\n\n  return {\n    json: {\n      ...item.json,\n      crm: {\n        returning: Boolean(existingId),\n        existing_contact_id: existingId,\n      },\n    },\n  };\n});"
+      }
+    },
+    {
+      "id": "1b8c60b2-032b-4520-ab0a-5f77292ea048",
+      "name": "Save to HubSpot",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2.2,
+      "position": [
+        1720,
+        -60
+      ],
+      "parameters": {
+        "authentication": "appToken",
+        "resource": "contact",
+        "operation": "upsert",
+        "email": "={{ $json.lead.email }}",
+        "additionalFields": {
+          "firstName": "={{ $json.lead.first_name }}",
+          "lastName": "={{ $json.lead.last_name }}",
+          "companyName": "={{ $json.lead.company }}",
+          "phoneNumber": "={{ $json.lead.phone }}",
+          "city": "={{ $json.lead.city }}",
+          "websiteUrl": "={{ $json.lead.website }}",
+          "customPropertiesUi": {
+            "customPropertiesValues": [
+              {
+                "property": "lead_tier",
+                "value": "={{ $json.scoring.tier }}"
+              },
+              {
+                "property": "lead_score",
+                "value": "={{ $json.scoring.score }}"
+              },
+              {
+                "property": "lead_score_reason",
+                "value": "={{ $json.scoring.reason }}"
+              },
+              {
+                "property": "lead_next_action",
+                "value": "={{ $json.scoring.suggested_next_action }}"
+              },
+              {
+                "property": "lead_source",
+                "value": "={{ $json.lead.source }}{{ $json.lead.source_detail ? ' / ' + $json.lead.source_detail : '' }}"
+              },
+              {
+                "property": "lead_message",
+                "value": "={{ $json.lead.message }}"
+              }
+            ]
+          }
+        }
+      },
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "ooIoh2bwqMD5I2wV",
+          "name": "Clearwater HubSpot"
+        }
+      },
+      "notes": "Create or update, keyed on email. This IS the deduplication: HubSpot treats email as the contact's identity, so two submissions arriving at the same moment cannot become two contacts.\n\nIf HubSpot refuses, the error output sends the lead to quarantine rather than dropping it.",
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "985fd8fb-ff87-4260-bf45-a01afa5cfb14",
+      "name": "Write to the Lead Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1960,
+        -160
+      ],
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1dxbgI6ncxODw_r9DmxpMldxNSMuTtSyL1GNc976tQ8o"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Lead Log"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "8eI3u6QwX5piR4pR",
+          "name": "Clearwater Google Sheets"
+        }
+      },
+      "notes": "The audit trail, and what the weekly summary counts from. It runs AFTER the CRM on purpose: if the log fails, the lead is already safely in HubSpot, so this never blocks a lead.",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "a76dc956-253a-4ba2-b15a-7f0485845007",
+      "name": "Say the CRM failed",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1960,
+        120
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "h1",
+              "name": "source",
+              "value": "={{ $('Check the score').item.json.lead.source }}",
+              "type": "string"
+            },
+            {
+              "id": "h2",
+              "name": "failed_step",
+              "value": "Save to HubSpot",
+              "type": "string"
+            },
+            {
+              "id": "h3",
+              "name": "error",
+              "value": "={{ 'HubSpot refused the contact: ' + (typeof $json.error === 'string' ? $json.error : ($json.error?.message || $json.message || 'unknown error')) }}",
+              "type": "string"
+            },
+            {
+              "id": "h4",
+              "name": "lead",
+              "value": "={{ $('Check the score').item.json.lead }}",
+              "type": "object"
+            },
+            {
+              "id": "h5",
+              "name": "raw_payload",
+              "value": "={{ { lead: $('Check the score').item.json.lead, scoring: $('Check the score').item.json.scoring } }}",
+              "type": "object"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "notes": "The lead was scored but could not be saved. The quarantine row keeps both the lead and its score, so it can be replayed without asking the AI again."
+    },
+    {
+      "id": "00cb5988-1f19-480f-8a23-10a772882658",
+      "name": "Shape the log row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1960,
+        -260
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// One row per lead, with keys named exactly like the Lead Log headers so the\n// Sheets node can map them by name. Doing it here rather than in the Sheets\n// node keeps the column list readable and diffable.\n\nreturn $('Is this a returning lead?').all().map((item) => {\n  const { lead, scoring, crm } = item.json;\n  return {\n    json: {\n      received_at: lead.received_at,\n      lead_id: lead.lead_id,\n      source: lead.source,\n      source_detail: lead.source_detail,\n      first_name: lead.first_name,\n      last_name: lead.last_name,\n      email: lead.email,\n      phone: lead.phone,\n      company: lead.company,\n      city: lead.city,\n      // Numbers are written as numbers: the weekly summary adds them up.\n      office_size_sqft: lead.office_size_sqft ?? '',\n      tier: scoring.tier + (crm?.returning ? ' (returning)' : ''),\n      score: scoring.score ?? '',\n      reason: scoring.reason,\n    },\n  };\n});"
+      }
     }
   ],
   "connections": {
@@ -440,6 +660,79 @@
         [
           {
             "node": "Send to quarantine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check the score": {
+      "main": [
+        [
+          {
+            "node": "Have we met before?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Have we met before?": {
+      "main": [
+        [
+          {
+            "node": "Is this a returning lead?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is this a returning lead?": {
+      "main": [
+        [
+          {
+            "node": "Save to HubSpot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to HubSpot": {
+      "main": [
+        [
+          {
+            "node": "Shape the log row",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Say the CRM failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Say the CRM failed": {
+      "main": [
+        [
+          {
+            "node": "Send to quarantine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape the log row": {
+      "main": [
+        [
+          {
+            "node": "Write to the Lead Log",
             "type": "main",
             "index": 0
           }
