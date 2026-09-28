@@ -1,0 +1,181 @@
+{
+  "id": "G7FfGK8zcUGJZgGV",
+  "name": "Clearwater · 01 Lead source - website form",
+  "active": true,
+  "nodes": [
+    {
+      "id": "fb11e5d2-4dbe-4e33-b2e3-4312015c783e",
+      "name": "Someone fills in the form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        -400,
+        0
+      ],
+      "parameters": {
+        "path": "clearwater-quote",
+        "formTitle": "Get a cleaning quote",
+        "formDescription": "Tell us about your premises and we'll come back to you the same working day. We clean offices and commercial spaces across the Portland metro area.",
+        "responseMode": "onReceived",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Your name",
+              "fieldType": "text",
+              "placeholder": "Maria Lopez",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Work email",
+              "fieldType": "email",
+              "placeholder": "you@yourcompany.com",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Phone",
+              "fieldType": "text",
+              "placeholder": "503 555 0142",
+              "requiredField": false
+            },
+            {
+              "fieldLabel": "Company",
+              "fieldType": "text",
+              "placeholder": "Northwind Legal",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "City",
+              "fieldType": "text",
+              "placeholder": "Portland",
+              "requiredField": false
+            },
+            {
+              "fieldLabel": "Roughly how big is the space? (sq ft)",
+              "fieldType": "number",
+              "placeholder": "12000",
+              "requiredField": false
+            },
+            {
+              "fieldLabel": "How often do you need cleaning?",
+              "fieldType": "dropdown",
+              "requiredField": false,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Nightly"
+                  },
+                  {
+                    "option": "3 times a week"
+                  },
+                  {
+                    "option": "Twice a week"
+                  },
+                  {
+                    "option": "Weekly"
+                  },
+                  {
+                    "option": "One-off clean"
+                  },
+                  {
+                    "option": "Not sure yet"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "What do you need?",
+              "fieldType": "textarea",
+              "placeholder": "When would you like to start, and anything else we should know.",
+              "requiredField": false
+            }
+          ]
+        },
+        "options": {
+          "path": "clearwater-quote",
+          "formSubmittedText": "Thank you. We have your details and someone will be in touch today.",
+          "appendAttribution": false
+        }
+      },
+      "notes": "Stands in for the contact form on the company's website. The fields are the ones that decide the score - size, frequency, city - so the AI has something real to judge instead of just a name and a message.",
+      "webhookId": "23365187-1145-4880-a399-98af63df0ad2"
+    },
+    {
+      "id": "f3621103-e688-4582-8ebb-bc29cf3035db",
+      "name": "Read the form",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -140,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// The form's answers arrive keyed by the question text, so the labels below\n// must match the form exactly. Change a question, change it here too.\n//\n// This is the same job the webhook source does: whatever the source calls its\n// fields, one standard lead comes out.\n\nreturn $input.all().map((item) => {\n  const form = item.json || {};\n  const get = (label) => String(form[label] ?? '').trim();\n\n  const fullName = get('Your name');\n  const [firstName, ...rest] = fullName.split(/\\s+/);\n\n  return {\n    json: {\n      lead: {\n        lead_id: `lead_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,\n        received_at: new Date().toISOString(),\n        source: 'form',\n        source_detail: 'website-contact',\n        first_name: firstName || '',\n        last_name: rest.join(' '),\n        email: get('Work email').toLowerCase(),\n        phone: get('Phone'),\n        company: get('Company'),\n        website: '',\n        office_size_sqft: Number(String(get('Roughly how big is the space? (sq ft)')).replace(/[^0-9.]/g, '')) || null,\n        cleaning_frequency: get('How often do you need cleaning?'),\n        city: get('City'),\n        message: get('What do you need?'),\n        raw: form,\n      },\n    },\n  };\n});"
+      },
+      "notes": "Maps the form's questions onto the standard lead."
+    },
+    {
+      "id": "b59d3745-6574-41f6-977c-b584e01a1dc3",
+      "name": "Hand it to the pipeline",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        120,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "g5GXZ8LfKYlS1WnF"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "notes": "The form already said thank you, so this does not wait. Nobody should watch a spinner while an AI thinks."
+    }
+  ],
+  "connections": {
+    "Someone fills in the form": {
+      "main": [
+        [
+          {
+            "node": "Read the form",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the form": {
+      "main": [
+        [
+          {
+            "node": "Hand it to the pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Los_Angeles",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "errorWorkflow": "KRTNj2ZJmaF6lcEt"
+  },
+  "nodeGroups": [],
+  "tags": []
+}

@@ -29,7 +29,7 @@ Three accounts, each with its own guide:
 | Guide | What it sets up | Time |
 |---|---|---|
 | [`docs/setup-hubspot.md`](docs/setup-hubspot.md) | Free HubSpot account, private app token, the five custom fields | 15 min |
-| [`docs/setup-google.md`](docs/setup-google.md) | Demo Gmail inbox, the `Leads` label, OAuth for n8n, the Sheet and criteria Doc | 25 min |
+| [`docs/setup-google.md`](docs/setup-google.md) | Demo Gmail inbox, the `+leads` address, OAuth for n8n, the Sheet and criteria Doc | 25 min |
 | [`docs/setup-telegram.md`](docs/setup-telegram.md) | The alerts bot | 5 min |
 
 Then:
@@ -46,6 +46,8 @@ cp .env.example .env         # add the HubSpot token and a webhook key
 
 | File | What it does | Built |
 |---|---|---|
+| `01-lead-source-website-form.json` | The website contact form, hosted by n8n. | M7 |
+| `02-lead-source-email.json` | A lead that arrives as a plain-English email to the `+leads` address. | M8 |
 | `03-lead-source-webhook.json` | A lead posted by an ad platform, Typeform or anything else that sends JSON. | M6 |
 | `10-process-lead.json` | The core. Normalises, scores, deduplicates into HubSpot, logs, and routes the alert. | M3-M5 |
 | `20-quarantine-and-alert.json` | The safety net. Catches a failed lead, writes it to the Quarantine tab with its raw payload, and alerts Telegram. | M2 |
@@ -102,6 +104,27 @@ If HubSpot refuses a contact, the lead does not vanish: the error output carries
 ```bash
 ./scripts/export-workflows.sh    # pull the workflows out of n8n into workflows/
 ```
+
+### The form source
+
+The form is hosted by n8n itself, so there is nothing to build or embed for a demo:
+
+```
+http://localhost:5678/form/clearwater-quote
+```
+
+Its questions are chosen to feed the scoring: **size, frequency and city** are what decide hot from warm, so asking them turns a vague "please contact me" into something the AI can actually judge. For a client's real site, the same workflow accepts a POST from their existing form instead.
+
+### The email source
+
+An email is prose, not a form, so the facts have to be read out of it. An Information Extractor pulls out name, company, size, frequency, city and a summary, against a schema that tells it plainly: **record only what the email says, never guess a size or a city**. A wrong fact here becomes a wrong score, and then a wrong decision.
+
+Four things worth knowing:
+
+- **It watches one address, not the inbox.** Only mail sent to the `+leads` address is ever read, which is worth saying out loud on a sales call. No Gmail filter or label is needed.
+- **It reads the whole email.** The trigger's Simplify option is off, because the simplified version is Gmail's ~200-character snippet: it cut "three evenings a week" to "three evenings a" and hid the signature, so the sender's account name was used instead of the person who signed it.
+- **Gmail is polled about once a minute**, so email leads are not instant. Form and webhook leads are.
+- **A failed email lead is quarantined, not retried.** The trigger remembers every message it has seen, so it never re-reads one, even if it is marked unread again. A lead that fails lands in the Quarantine tab with a Telegram alert, and the email itself is marked read only after the pipeline has finished with it.
 
 ### The webhook source
 

@@ -1,0 +1,218 @@
+{
+  "id": "fFOyIZNpEwR95LOB",
+  "name": "Clearwater · 02 Lead source - email",
+  "active": true,
+  "nodes": [
+    {
+      "id": "38ad7003-4fd9-4892-81a1-118e1be188a9",
+      "name": "A lead email arrives",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -640,
+        0
+      ],
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "to:clearwater.leads.demo15+leads@gmail.com is:unread",
+          "readStatus": "unread"
+        },
+        "maxResults": 10
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "grxznneZKC9dle4t",
+          "name": "Clearwater Gmail (demo inbox)"
+        }
+      },
+      "notes": "Watches ONLY mail sent to the +leads address, so the rest of the inbox is never read.\n\nSimplify is OFF on purpose: the simplified response carries only Gmail's ~200-character snippet, which cuts the email off mid-sentence and hides the signature. The facts we need - company, size, frequency, who is actually writing - are usually below that line.\n\nGmail is polled about once a minute, so email leads are not instant. Form and webhook leads are."
+    },
+    {
+      "id": "02d6ea16-e247-42a5-958e-1836fbbcd1b9",
+      "name": "Pull the lead out of the email",
+      "type": "@n8n/n8n-nodes-langchain.informationExtractor",
+      "typeVersion": 1.2,
+      "position": [
+        -380,
+        0
+      ],
+      "parameters": {
+        "text": "=From: {{ $json.From || $json.from?.text || $json.from }}\nSubject: {{ $json.Subject || $json.subject }}\n\n{{ ($json.text || $json.textPlain || $json.snippet || '').slice(0, 6000) }}",
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"first_name\": { \"type\": \"string\", \"description\": \"The sender's first name, from their signature or the From line. Empty string if not stated.\" },\n    \"last_name\": { \"type\": \"string\", \"description\": \"The sender's surname. Empty string if not stated.\" },\n    \"email\": { \"type\": \"string\", \"description\": \"The best reply-to address. Prefer one written in the signature; otherwise the address in the From line.\" },\n    \"phone\": { \"type\": \"string\", \"description\": \"Phone number if one is given, otherwise an empty string.\" },\n    \"company\": { \"type\": \"string\", \"description\": \"The company or organisation they are writing on behalf of. Empty string if not stated.\" },\n    \"city\": { \"type\": \"string\", \"description\": \"Town or city of the premises, if mentioned. Empty string otherwise.\" },\n    \"office_size_sqft\": { \"type\": \"number\", \"description\": \"Size of the premises in square feet as a plain number, e.g. 4200 for '4,200 sq ft'. Use 0 if no size is given - never guess one.\" },\n    \"cleaning_frequency\": { \"type\": \"string\", \"description\": \"How often they want cleaning, in their own words, e.g. 'three evenings a week'. Empty string if not stated.\" },\n    \"summary\": { \"type\": \"string\", \"description\": \"One or two sentences saying what they are asking for, including any start date and budget they mention.\" }\n  },\n  \"required\": [\"email\", \"summary\"]\n}",
+        "options": {
+          "systemPromptTemplate": "You read an email sent to a commercial cleaning company and pull out the facts about the enquiry.\n\nOnly record what the email actually says. If something is not stated, leave it empty or zero - never guess a size, a city or a company. A wrong fact here becomes a wrong score, and then a wrong decision."
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "notes": "An email is prose, not a form: the facts have to be read out of it. If this fails, the lead still continues - the pipeline treats it as unscored rather than losing it."
+    },
+    {
+      "id": "619e4400-f8b9-403f-990c-41ba0768e177",
+      "name": "Groq model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        -320,
+        200
+      ],
+      "parameters": {
+        "model": "openai/gpt-oss-20b",
+        "options": {
+          "temperature": 0
+        }
+      },
+      "credentials": {
+        "groqApi": {
+          "id": "t3nHYVkwfyTP9BII",
+          "name": "Groq (Clearwater)"
+        }
+      }
+    },
+    {
+      "id": "a55de7c5-c13a-4133-87a7-fe58cacdf7a0",
+      "name": "Build the lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -120,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Turn what was read out of the email into the standard lead.\n//\n// The sender's own address is the fallback for the email field: the extraction\n// can miss a signature, but the From line is always there, and a lead we\n// cannot reply to is useless.\n\nfunction addressFrom(fromLine) {\n  const match = String(fromLine || '').match(/[\\w.+-]+@[\\w-]+\\.[\\w.-]+/);\n  return match ? match[0].toLowerCase() : '';\n}\n\nconst emails = $('A lead email arrives').all();\n\nreturn $input.all().map((item, index) => {\n  const raw = emails[index]?.json || emails[0]?.json || {};\n  // Gmail returns capitalised header names (From, Subject); other paths use\n  // lower case. Accept both rather than depending on which one turns up.\n  // With Simplify off, `from` is a parsed object ({ value: [...], text }),\n  // not a string, so take its text form.\n  const mail = {\n    from: raw.From || raw.from?.text || raw.from || '',\n    subject: raw.Subject || raw.subject || '',\n    id: raw.id || '',\n  };\n  const found = item.json?.output || item.json || {};\n\n  const size = Number(found.office_size_sqft) || null;\n\n  return {\n    json: {\n      lead: {\n        lead_id: `lead_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,\n        received_at: new Date().toISOString(),\n        source: 'email',\n        source_detail: 'inbox',\n        first_name: String(found.first_name || '').trim(),\n        last_name: String(found.last_name || '').trim(),\n        email: String(found.email || '').trim().toLowerCase() || addressFrom(mail.from),\n        phone: String(found.phone || '').trim(),\n        company: String(found.company || '').trim(),\n        website: '',\n        office_size_sqft: size,\n        cleaning_frequency: String(found.cleaning_frequency || '').trim(),\n        city: String(found.city || '').trim(),\n        // The subject is kept with the summary: \"Cleaning quote for our clinic\"\n        // is often the clearest sentence in the whole email.\n        message: [mail.subject, found.summary].filter(Boolean).join(' - '),\n        raw: { from: mail.from, subject: mail.subject, id: mail.id, extracted: found },\n      },\n    },\n  };\n});"
+      }
+    },
+    {
+      "id": "a15fcfd0-7b22-420f-90f1-161528cb2964",
+      "name": "Hand it to the pipeline",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        120,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "g5GXZ8LfKYlS1WnF"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "notes": "Waits here, unlike the other sources: the email must not be marked as read until the lead is safely through the pipeline."
+    },
+    {
+      "id": "4d71f375-94ca-42ce-9f0d-fad17cac200a",
+      "name": "Mark the email as read",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        360,
+        0
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "markAsRead",
+        "messageId": "={{ $('A lead email arrives').item.json.id }}"
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "grxznneZKC9dle4t",
+          "name": "Clearwater Gmail (demo inbox)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Stops the same email becoming a lead every minute. It runs only after the pipeline has finished. A failed lead is not retried - the trigger never re-reads a message it has seen - it goes to the Quarantine tab and Telegram instead.",
+      "webhookId": "470b33e4-75c3-485e-b332-975ffc2b63cc"
+    }
+  ],
+  "connections": {
+    "A lead email arrives": {
+      "main": [
+        [
+          {
+            "node": "Pull the lead out of the email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pull the lead out of the email": {
+      "main": [
+        [
+          {
+            "node": "Build the lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build the lead": {
+      "main": [
+        [
+          {
+            "node": "Hand it to the pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hand it to the pipeline": {
+      "main": [
+        [
+          {
+            "node": "Mark the email as read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Pull the lead out of the email",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Los_Angeles",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "errorWorkflow": "KRTNj2ZJmaF6lcEt"
+  },
+  "nodeGroups": [],
+  "tags": []
+}

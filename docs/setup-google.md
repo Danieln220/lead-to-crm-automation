@@ -19,17 +19,17 @@ what a client has: a `sales@` or `info@` address that leads arrive at.
 
 Real companies have a dedicated address. We copy that with a **plus address**, which
 Gmail supports for free: anything sent to `clearwater.leads.demo+leads@gmail.com`
-arrives in the same inbox, and can be filtered.
+arrives in the same inbox.
 
-In the demo account:
+There is nothing to configure inside Gmail. The trigger in `02-lead-source-email`
+searches for `to:<your address>+leads@gmail.com is:unread`, so it only ever sees mail
+sent to the `+leads` address. Nothing else in the inbox is touched.
 
-1. **Settings (cog) → See all settings → Filters and Blocked Addresses**.
-2. **Create a new filter**.
-3. In **To**, put `clearwater.leads.demo+leads@gmail.com` (your actual address).
-4. **Create filter** → tick **Apply the label** → **New label** → `Leads` → **Create filter**.
+**On a new account, change that address in the trigger** (the node "A lead email
+arrives" → Search). It is set to the demo inbox, `clearwater.leads.demo15+leads@gmail.com`.
 
-Now anything sent to the `+leads` address is labelled automatically, and the pipeline
-only ever looks at that label. Nothing else in the inbox is touched.
+*(An earlier version matched a Gmail label called `Leads`. That needs a Gmail filter
+to apply the label, which is one more thing to forget, so it was dropped.)*
 
 ## 3. Let n8n read that inbox (OAuth)
 
@@ -81,12 +81,13 @@ Both are shared with your main account so you can open them while recording.
 | n8n reads nothing after a week | The 7-day testing-mode expiry - reconnect the credential |
 | `invalid_grant` | Same thing, or the clock on the machine is wrong |
 | Redirect URI mismatch | The URI in Google Cloud must match n8n's exactly, including `http` and the port |
-| The Gmail trigger sees nothing | Check the filter is labelling mail `Leads`, and that the test email went to the **+leads** address |
+| The Gmail trigger sees nothing | Check the test email went to the **+leads** address, and that the trigger's Search uses your address |
+| Marking an old email unread does not re-run it | Expected: the trigger remembers what it has processed. Send a fresh email |
 
 ## Worth knowing for real clients
 
 - A client on **Google Workspace** can authorise this in a minute and has no 7-day limit.
-- The pipeline only ever reads mail carrying one label. Say that out loud in the sales
+- The pipeline only ever reads mail sent to one address. Say that out loud in the sales
   call - "it never sees the rest of your inbox" answers a question people are too
   polite to ask.
 - Gmail is polled about once a minute, so email leads are not instant. Form and webhook
