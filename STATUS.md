@@ -1,6 +1,6 @@
 # Where this project stands
 
-Last updated: 2026-09-29 (M9 closed). Read this first when picking the work back up.
+Last updated: 2026-10-01 (M10 closed). Read this first when picking the work back up.
 
 ## Done and tested
 
@@ -15,16 +15,21 @@ Last updated: 2026-09-29 (M9 closed). Read this first when picking the work back
 | M7 | Website form source | Daniel's own submission scored cold 2, correctly, because Herzliya is outside the service area |
 | M8 | Email source | A fresh email to `+leads` (2026-09-28) was read in full: Priya Raman (from the signature), "three evenings a week", Tigard, 4,200 sq ft, hot 9/10 alert with HubSpot link. The From-address fallback now works when the email body has no address (it failed at 12:32 and was fixed; the regex was tested against the real `from` object) |
 | M9 | Weekly summary | Test run on 2026-09-29 posted a real digest to Telegram: 10 leads for Sep 21–27 (7 hot, 3 cold; Form 4, Facebook Ads 3, Email 2, Google Ads 1), top 3 hot leads, 12 Quarantine items. Temporary test webhook removed afterwards |
+| M10 | Export + fresh-instance import | 2026-10-01: `n8n import:workflow` into an empty n8n 2.35 (new data folder, port 5680): 6/6 imported with the same IDs, 0 broken links between workflows, 0 validation errors, started cleanly. Published 20 → 10 → 01 with no credentials, and the form served `Get a cleaning quote` (HTTP 200). Only missing piece: the 7 credentials. Install steps are in the README |
 
 ## Still to build
 
-Next up is **M10**, which needs Daniel's approval before it starts.
+Next up is **Phase 4**, which needs Daniel's approval before it starts.
 
-- **M10** - export everything and prove it imports into an empty n8n on another port.
 - **Phase 4** - DEMO.md, a reset script, HANDOFF.md.
 
 ## Things to remember
 
+- n8n will not publish a workflow whose sub-workflow is unpublished: switch on 20, then
+  10, then the rest.
+- The Sheet and Telegram IDs are written into 5 and 3 nodes; a new client means editing
+  each (listed in the README). Could be moved into one Settings node per workflow.
+- Port 5679 is not free on this Mac: the main n8n uses it for its task runners.
 - The Google credentials expire every **7 days** while the OAuth consent screen is in
   testing mode. Reconnect Gmail, Sheets and Docs in n8n before recording.
 - HubSpot rejects `.example` email domains. The sample leads use `*-demo.com`.

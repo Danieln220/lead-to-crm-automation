@@ -1,86 +1,31 @@
 # Lead-to-CRM Automation
 
-Leads from forms, emails and webhooks are deduplicated, scored by AI against editable criteria, written to the CRM, and routed to the right alert within seconds.
+An n8n pipeline that captures leads from a website form, email and ad platforms, scores each one with AI against criteria the business writes in plain English, saves it to HubSpot without duplicates, and alerts the owner on Telegram the moment a hot lead arrives.
 
-> Status: in progress. M1 (accounts) and M2 (quarantine) done. Next: M3, AI scoring. See `PLAN.md` for the full plan.
+Demo client: **Clearwater Commercial Cleaning**, a Portland office-cleaning company that sells recurring contracts to other businesses.
 
-Demo company: **Clearwater Commercial Cleaning**, Portland, Oregon — sells recurring office-cleaning contracts to other businesses.
+## Features
+
+- **Three lead sources:** a hosted website form, a Gmail inbox, and a secured webhook for Facebook Ads, Google Ads, Typeform or any other tool that sends JSON.
+- **AI scoring from a Google Doc.** The owner edits the criteria in plain English, and the next lead is scored by the new rules. No changes in n8n are needed.
+- **No duplicate contacts.** HubSpot's create-or-update is keyed on email, and returning contacts are flagged as a buying signal.
+- **Alerts only when they matter.** Hot leads go to Telegram with the reason, a suggested next step and a link to HubSpot. Warm and cold leads go to the CRM quietly.
+- **Nothing is lost.** Any lead that cannot be processed lands in a Quarantine sheet with its original data, and the owner is alerted.
+- **Weekly summary.** Every Monday morning the owner gets lead counts by tier and source, plus the top hot leads.
 
 ## How it works
 
-Three thin source workflows convert whatever arrives into one standard lead, then hand it to a single core workflow. Adding a fourth source means writing one small workflow, not copying the logic.
-
 ```
-Form ─┐
-Gmail ─┼→ normalise → validate → score (AI) → dedupe → HubSpot → log → route
-Webhook ┘                   ↓ any failure                              ├ hot  → Telegram alert
-                        quarantine sheet + alert                       ├ warm → CRM tag
-                                                                       └ cold → CRM only
+Form ────┐
+Gmail ───┼→ normalise → validate → AI score → HubSpot → Lead Log → route
+Webhook ─┘                 │                                       ├ hot  → Telegram alert
+                           ▼                                       ├ warm → CRM
+                  Quarantine + alert                               └ cold → CRM
 ```
 
-- **Scoring criteria live in a Google Doc**, read on every run, so the owner changes the rules from a phone without touching n8n.
-- **Dedupe is real**: HubSpot's create-or-update is keyed on email, so two simultaneous submissions cannot create two contacts.
-- **Nothing is lost.** Every external step has an error branch to a quarantine sheet that keeps the raw payload, plus an alert. If only the scoring fails, the lead still reaches the CRM as "unscored".
+Each source converts its input into one standard lead format and hands it to a single core workflow. Adding a new source means adding one small workflow; the core logic is never copied.
 
-## Setup
-
-Three accounts, each with its own guide:
-
-| Guide | What it sets up | Time |
-|---|---|---|
-| [`docs/setup-hubspot.md`](docs/setup-hubspot.md) | Free HubSpot account, private app token, the five custom fields | 15 min |
-| [`docs/setup-google.md`](docs/setup-google.md) | Demo Gmail inbox, the `+leads` address, OAuth for n8n, the Sheet and criteria Doc | 25 min |
-| [`docs/setup-telegram.md`](docs/setup-telegram.md) | The alerts bot | 5 min |
-
-Then:
-
-```bash
-cp .env.example .env         # add the HubSpot token and a webhook key
-./scripts/create-hubspot-properties.sh          # adds the 5 custom fields
-./scripts/create-hubspot-properties.sh --check  # lists them, changes nothing
-```
-
-`config/ids.md` records the Sheet and Doc IDs that go into each workflow's Config node.
-
-## The workflows
-
-| File | What it does | Built |
-|---|---|---|
-| `01-lead-source-website-form.json` | The website contact form, hosted by n8n. | M7 |
-| `02-lead-source-email.json` | A lead that arrives as a plain-English email to the `+leads` address. | M8 |
-| `03-lead-source-webhook.json` | A lead posted by an ad platform, Typeform or anything else that sends JSON. | M6 |
-| `10-process-lead.json` | The core. Normalises, scores, deduplicates into HubSpot, logs, and routes the alert. | M3-M5 |
-| `20-quarantine-and-alert.json` | The safety net. Catches a failed lead, writes it to the Quarantine tab with its raw payload, and alerts Telegram. | M2 |
-| `30-weekly-summary.json` | Every Monday at 08:00, counts last week's leads by tier and source and posts a one-message digest to Telegram. | M9 |
-
-The quarantine workflow has **two ways in**, which is the point:
-
-- **Called on purpose** by the pipeline when it knows a lead cannot continue — no email address, scoring failed, HubSpot refused. This path carries the lead itself, so the row holds enough to replay it by hand.
-- **The Error Trigger**, set as the Error Workflow on every other Clearwater workflow. It catches anything unexpected — a crashed node, a dead API — and records which workflow, which step, and a link straight to the failed execution.
-
-Built first on purpose: every later milestone wires its failures into this, rather than bolting error handling on at the end. It earned its place immediately — while building the scoring step, it caught two of my own crashes and recorded the failing node and a link to the execution.
-
-### How the scoring is kept honest
-
-- **The criteria are read on every lead**, straight from the Google Doc. The owner edits it in plain English and the next lead follows the new rules.
-- **The shape is enforced, not requested.** A structured output parser holds the model to a JSON schema, with one automatic repair attempt.
-- **The tier is recalculated from the score** in code. A model that says "score 9, tier cold" cannot quietly drop a hot lead, and the disagreement is recorded.
-- **A scoring failure never costs a lead.** If Groq is down or the reply is unusable, the lead continues as `unscored` and still reaches the CRM — with an alert — rather than stopping the pipeline.
-- **Temperature 0**, so the same lead always gets the same score.
-
-### How the deduplication is guaranteed
-
-The lead is written with HubSpot's **create-or-update, keyed on email**. HubSpot treats the email address as the contact's identity, so two submissions arriving at the same moment cannot become two contacts — the guarantee is HubSpot's, not a check of ours that could race.
-
-A separate search runs first, but only to answer a different question: *have we heard from this person before?* A returning lead is a buying signal, so it is flagged rather than quietly merged. That search is deliberately **not** the dedupe, because HubSpot's search index lags a few seconds behind writes.
-
-### Who gets interrupted
-
-Only two things reach a phone: a **hot** lead, and a lead the AI **could not score**. Warm and cold sit in the CRM with their tier and reason.
-
-That restraint is the design. An alert that fires for every lead is muted within a week, and then the hot ones are missed too.
-
-A hot alert carries everything needed to decide whether to pick up the phone, without opening anything else:
+### Hot lead alert
 
 ```
 🔥 HOT LEAD - 10/10
@@ -98,59 +43,7 @@ Next: Call today to schedule the walkthrough and discuss pricing.
 Open in HubSpot →
 ```
 
-A returning lead gets a **🔁 RETURNING LEAD** line above that, because someone who asks twice is more interested, not less.
-
-If HubSpot refuses a contact, the lead does not vanish: the error output carries it — **with its score**, so the AI is not asked twice — into the quarantine sheet, and the row says exactly what HubSpot objected to.
-
-```bash
-./scripts/export-workflows.sh    # pull the workflows out of n8n into workflows/
-```
-
-### The form source
-
-The form is hosted by n8n itself, so there is nothing to build or embed for a demo:
-
-```
-http://localhost:5678/form/clearwater-quote
-```
-
-Its questions are chosen to feed the scoring: **size, frequency and city** are what decide hot from warm, so asking them turns a vague "please contact me" into something the AI can actually judge. For a client's real site, the same workflow accepts a POST from their existing form instead.
-
-### The email source
-
-An email is prose, not a form, so the facts have to be read out of it. An Information Extractor pulls out name, company, size, frequency, city and a summary, against a schema that tells it plainly: **record only what the email says, never guess a size or a city**. A wrong fact here becomes a wrong score, and then a wrong decision.
-
-Four things worth knowing:
-
-- **It watches one address, not the inbox.** Only mail sent to the `+leads` address is ever read, which is worth saying out loud on a sales call. No Gmail filter or label is needed.
-- **It reads the whole email.** The trigger's Simplify option is off, because the simplified version is Gmail's ~200-character snippet: it cut "three evenings a week" to "three evenings a" and hid the signature, so the sender's account name was used instead of the person who signed it.
-- **Gmail is polled about once a minute**, so email leads are not instant. Form and webhook leads are.
-- **A failed email lead is quarantined, not retried.** The trigger remembers every message it has seen, so it never re-reads one, even if it is marked unread again. A lead that fails lands in the Quarantine tab with a Telegram alert, and the email itself is marked read only after the pipeline has finished with it.
-
-### The webhook source
-
-```bash
-./scripts/send-test-lead.sh              # hot | warm | cold | broken
-./scripts/send-test-lead.sh hot --no-key # prove the endpoint is protected
-```
-
-| What is posted | Reply |
-|---|---|
-| A usable lead with the secret header | `202 Accepted` with a `lead_id` to quote later |
-| No header, or the wrong one | `403` — n8n rejects it before any node runs |
-| A payload with no email, phone or message | `400` with the reason, **and the payload is kept in quarantine** |
-
-Three decisions worth knowing:
-
-- **The secret lives in an n8n credential, not in the workflow.** A key written into a node ends up in the exported JSON, and then in git. n8n checks the header itself and answers `403` before the workflow starts, so a stranger who finds the URL never reaches a single node.
-- **The reply does not wait for the pipeline.** The sender gets its `202` immediately while scoring and the CRM happen behind it. An ad platform kept waiting starts retrying, and you get the same lead three times.
-- **`400` rather than a polite `200`** for an unusable payload. A broken integration should be loud on the sender's side; a 200 lets a misconfigured form post nothing for weeks unnoticed.
-
-Adding a fourth source means copying one node — "Read the lead", which maps that platform's field names — and nothing else.
-
-### The weekly summary
-
-Every Monday at 08:00 Portland time, one Telegram message:
+### Weekly summary
 
 ```
 📊 Weekly leads · Sep 21–27
@@ -160,27 +53,113 @@ Form 4 · Facebook Ads 3 · Email 2 · Google Ads 1
 🔁 4 from returning contacts
 
 Top hot leads
-1. Northwind Legal – 10/10 – Northwind Legal is a 12,000 sq ft office in Portland…
-2. Meridian Partners – 10/10 – Meridian Partners wants nightly cleaning for a…
-3. Cedar Park Family Medicine – 9/10 – "Cedar Park Family Medicine" in Tigard wants…
+1. Northwind Legal – 10/10 – 12,000 sq ft office in Portland, nightly cleaning…
+2. Meridian Partners – 10/10 – nightly cleaning for a 12,000 sq ft floor…
+3. Cedar Park Family Medicine – 9/10 – clinic in Tigard, three evenings a week…
 
 ⚠️ 12 items waiting in the Quarantine tab
 ```
 
-Three decisions worth knowing:
+## Workflows
 
-- **It counts; it does not ask an AI.** The numbers come straight from the Lead Log, so they cannot be wrong and cost nothing.
-- **"Last week" means Monday to Sunday in the client's time zone,** so "Sep 21–27" means exactly that, wherever n8n happens to run.
-- **A quiet week still sends a message** ("No new leads last week"). Silence would look the same as a broken workflow. If n8n was off at 08:00 on Monday, the missed digest is sent as soon as it is back.
-
-Webhook leads are counted by the platform they came from (Facebook Ads, Google Ads), because that is what tells the owner where to spend next month.
-
-## What's in here
-
-| Folder | What it is |
+| File | Purpose |
 |---|---|
-| `workflows/` | The n8n workflows, exported as JSON |
-| `config/` | The scoring criteria template, the lead schema, and where things live |
-| `sample_data/` | Test leads (hot, warm, cold, broken) and two lead emails |
-| `scripts/` | One-time setup and test helpers |
-| `docs/` | The account setup guides |
+| `01-lead-source-website-form.json` | Website quote form, hosted by n8n |
+| `02-lead-source-email.json` | Reads lead emails sent to the `+leads` address and extracts the details with AI |
+| `03-lead-source-webhook.json` | Secured endpoint for ad platforms and form tools |
+| `10-process-lead.json` | Core pipeline: validate, score, save to HubSpot, log, route |
+| `20-quarantine-and-alert.json` | Error handling for failed leads and crashed workflows |
+| `30-weekly-summary.json` | Monday 08:00 digest to Telegram |
+
+## Design decisions
+
+- **Scoring is reliable, not just plausible.** The model runs at temperature 0 behind a strict JSON schema. The tier is then recalculated from the score in code, so a mislabelled hot lead can't slip through. If scoring fails, the lead is still saved as "unscored" and flagged for a human.
+- **Deduplication is HubSpot's guarantee, not a race-prone check.** Create-or-update keyed on email means two simultaneous submissions can't create two contacts.
+- **Errors are designed in from the start.** Every external call has an error path to the Quarantine sheet. An Error Trigger workflow catches anything unexpected and records the failing step with a link to the execution.
+- **The webhook is protected and fast.** A secret header is checked by n8n before any node runs. The sender gets `202` immediately, so ad platforms don't retry and create duplicates. An unusable payload gets `400`, so a broken integration is noticed rather than silently dropped.
+- **The email source reads only one address.** Mail sent to `+leads` is processed; the rest of the inbox is never touched.
+- **The weekly summary is counted, not generated.** The numbers come straight from the Lead Log, and a quiet week still sends a message, so silence never hides a fault.
+
+## Tech stack
+
+n8n 2.x · Groq (`gpt-oss-20b`) · HubSpot · Google Sheets, Docs and Gmail · Telegram
+
+## Setup
+
+### 1. Accounts
+
+| Guide | Sets up | Time |
+|---|---|---|
+| [`docs/setup-hubspot.md`](docs/setup-hubspot.md) | HubSpot account, private app token, custom fields | 15 min |
+| [`docs/setup-google.md`](docs/setup-google.md) | Gmail inbox, Google OAuth for n8n, the Sheet and criteria Doc | 25 min |
+| [`docs/setup-telegram.md`](docs/setup-telegram.md) | Telegram alerts bot | 5 min |
+
+```bash
+cp .env.example .env                            # HubSpot token and webhook key
+./scripts/create-hubspot-properties.sh          # create the custom HubSpot fields
+./scripts/create-hubspot-properties.sh --check  # verify them
+```
+
+### 2. Import the workflows
+
+```bash
+n8n import:workflow --separate --input=workflows
+```
+
+Or use *Import from file* in the n8n editor. Workflow IDs are preserved, so the links between workflows keep working. Imported workflows arrive switched off.
+
+### 3. Connect credentials
+
+Create these in n8n, then select them in any node that shows a warning:
+
+| Credential | Type | Used by |
+|---|---|---|
+| Clearwater Google Sheets | Google Sheets OAuth2 | 10, 20, 30 |
+| Clearwater Google Docs | Google Docs OAuth2 | 10 |
+| Clearwater Gmail (demo inbox) | Gmail OAuth2 | 02 |
+| Clearwater HubSpot | HubSpot App Token | 10 |
+| Clearwater Leads Bot | Telegram | 10, 20, 30 |
+| Groq (Clearwater) | Groq | 02, 10 |
+| Clearwater webhook key | Header Auth | 03 |
+
+### 4. Activate in order
+
+Switch on **20**, then **10**, then **01, 02, 03 and 30**. n8n won't activate a workflow until the sub-workflows it calls are active.
+
+### Adapting for a new client
+
+Replace the IDs in these nodes. The current values are listed in [`config/ids.md`](config/ids.md).
+
+| ID | Nodes |
+|---|---|
+| Google Sheet | 10: *Settings*, *Write to the Lead Log* · 20: *Write to the Quarantine tab* · 30: *Read the Lead Log*, *Read the Quarantine tab* |
+| Telegram chat | 10: *Settings* · 20: *Alert the owner* · 30: *Send the digest* |
+| Criteria Doc, HubSpot portal | 10: *Settings* |
+
+Then copy [`config/scoring-criteria.txt`](config/scoring-criteria.txt) into the client's own Google Doc and rewrite it for their business.
+
+## Testing
+
+```bash
+./scripts/send-test-lead.sh               # hot | warm | cold | broken
+./scripts/send-test-lead.sh hot --no-key  # confirm the webhook rejects unsigned requests
+```
+
+- **Website form:** `http://localhost:5678/form/clearwater-quote`
+- **Email:** send one of the samples in `sample_data/emails/` to the `+leads` address. Gmail is checked about once a minute.
+
+To pull the latest workflow versions out of n8n into `workflows/`:
+
+```bash
+./scripts/export-workflows.sh
+```
+
+## Repository structure
+
+| Folder | Contents |
+|---|---|
+| `workflows/` | n8n workflows exported as JSON |
+| `config/` | Scoring criteria template, lead schema, account IDs |
+| `sample_data/` | Test leads (hot, warm, cold, broken) and sample emails |
+| `scripts/` | Setup, test and export helpers |
+| `docs/` | Account setup guides |

@@ -2,9 +2,9 @@
 
 Created 2026-09-23, in the account **novizkidaniel@gmail.com**.
 
-These IDs go into the **Config node** at the top of each n8n workflow, not into `.env`:
-n8n 2.x blocks environment variables inside nodes by default, and one visible node is
-easier to hand over than a hidden file.
+These IDs live in the workflows themselves, not in `.env`: n8n 2.x blocks environment
+variables inside nodes by default. The README's *Installing on a fresh n8n* lists every
+node that holds one.
 
 | What | ID | Open it |
 |---|---|---|
@@ -47,10 +47,11 @@ store; nothing here is a secret.
 | Clearwater Gmail (demo inbox) | `gmailOAuth2` | `grxznneZKC9dle4t` |
 | Clearwater Google Sheets | `googleSheetsOAuth2Api` | `8eI3u6QwX5piR4pR` |
 | Clearwater Google Docs | `googleDocsOAuth2Api` | `vFRyMHolrZmKj4Fg` |
+| Clearwater webhook key | `httpHeaderAuth` | `7WJ5BlLqH3PqwYFT` |
 
 The Groq key is shared with Project 1: one free account, one key to rotate.
 
-All six are signed in as the demo account, except HubSpot and Telegram, which use
-tokens rather than a sign-in. The three Google ones share one OAuth client in the
+The four Google ones are signed in as the demo account; HubSpot, Telegram, Groq and the
+webhook key are tokens rather than sign-ins. The three Google ones share one OAuth client in the
 `Clearwater Leads` Google Cloud project - which is why its consent screen expires
 every 7 days while it is in testing mode.
