@@ -51,8 +51,9 @@ cp .env.example .env         # add the HubSpot token and a webhook key
 | `03-lead-source-webhook.json` | A lead posted by an ad platform, Typeform or anything else that sends JSON. | M6 |
 | `10-process-lead.json` | The core. Normalises, scores, deduplicates into HubSpot, logs, and routes the alert. | M3-M5 |
 | `20-quarantine-and-alert.json` | The safety net. Catches a failed lead, writes it to the Quarantine tab with its raw payload, and alerts Telegram. | M2 |
+| `30-weekly-summary.json` | Every Monday at 08:00, counts last week's leads by tier and source and posts a one-message digest to Telegram. | M9 |
 
-It has **two ways in**, which is the point:
+The quarantine workflow has **two ways in**, which is the point:
 
 - **Called on purpose** by the pipeline when it knows a lead cannot continue — no email address, scoring failed, HubSpot refused. This path carries the lead itself, so the row holds enough to replay it by hand.
 - **The Error Trigger**, set as the Error Workflow on every other Clearwater workflow. It catches anything unexpected — a crashed node, a dead API — and records which workflow, which step, and a link straight to the failed execution.
@@ -146,6 +147,33 @@ Three decisions worth knowing:
 - **`400` rather than a polite `200`** for an unusable payload. A broken integration should be loud on the sender's side; a 200 lets a misconfigured form post nothing for weeks unnoticed.
 
 Adding a fourth source means copying one node — "Read the lead", which maps that platform's field names — and nothing else.
+
+### The weekly summary
+
+Every Monday at 08:00 Portland time, one Telegram message:
+
+```
+📊 Weekly leads · Sep 21–27
+
+10 leads: 🔥 7 hot · 0 warm · 3 cold
+Form 4 · Facebook Ads 3 · Email 2 · Google Ads 1
+🔁 4 from returning contacts
+
+Top hot leads
+1. Northwind Legal – 10/10 – Northwind Legal is a 12,000 sq ft office in Portland…
+2. Meridian Partners – 10/10 – Meridian Partners wants nightly cleaning for a…
+3. Cedar Park Family Medicine – 9/10 – "Cedar Park Family Medicine" in Tigard wants…
+
+⚠️ 12 items waiting in the Quarantine tab
+```
+
+Three decisions worth knowing:
+
+- **It counts; it does not ask an AI.** The numbers come straight from the Lead Log, so they cannot be wrong and cost nothing.
+- **"Last week" means Monday to Sunday in the client's time zone,** so "Sep 21–27" means exactly that, wherever n8n happens to run.
+- **A quiet week still sends a message** ("No new leads last week"). Silence would look the same as a broken workflow. If n8n was off at 08:00 on Monday, the missed digest is sent as soon as it is back.
+
+Webhook leads are counted by the platform they came from (Facebook Ads, Google Ads), because that is what tells the owner where to spend next month.
 
 ## What's in here
 

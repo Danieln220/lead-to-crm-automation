@@ -1,0 +1,206 @@
+{
+  "id": "UPMIlT8cHOJcn6wF",
+  "name": "Clearwater · 30 Weekly summary",
+  "active": true,
+  "nodes": [
+    {
+      "id": "8a9c8a9c-1268-4c1d-9e4a-123d3fe76e09",
+      "name": "Every Monday 08:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -600,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "weeksInterval": 1,
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 8,
+              "triggerAtMinute": 0
+            }
+          ]
+        },
+        "misfirePolicy": "coalesce"
+      },
+      "notes": "Portland time (set in the workflow settings). If n8n was off at 08:00, the missed digest runs as soon as it is back."
+    },
+    {
+      "id": "eeedfaa6-e078-4211-ba90-6bc86d187b53",
+      "name": "Read the Lead Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -360,
+        0
+      ],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1dxbgI6ncxODw_r9DmxpMldxNSMuTtSyL1GNc976tQ8o"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Lead Log"
+        },
+        "filtersUI": {},
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "8eI3u6QwX5piR4pR",
+          "name": "Clearwater Google Sheets"
+        }
+      },
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "notes": "Always outputs, so an empty log still produces a 'no new leads' digest instead of stopping here."
+    },
+    {
+      "id": "85b6af79-345a-4ad1-b22d-b70038d0c76a",
+      "name": "Read the Quarantine tab",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -120,
+        0
+      ],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1dxbgI6ncxODw_r9DmxpMldxNSMuTtSyL1GNc976tQ8o"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Quarantine"
+        },
+        "filtersUI": {},
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "8eI3u6QwX5piR4pR",
+          "name": "Clearwater Google Sheets"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "notes": "Execute once: otherwise it would re-read the tab for every Lead Log row."
+    },
+    {
+      "id": "f08af3c2-03d4-49a9-b789-69816192c9cd",
+      "name": "Count last week",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        120,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Count last week's leads and write the Monday digest.\n//\n// \"Last week\" is the previous Monday to Sunday in the client's own time zone, so\n// the message can say \"Sep 21-27\" and mean exactly that. Nothing here is\n// estimated by AI: it is a count of the Lead Log, so it cannot be wrong.\n\nconst ZONE = 'America/Los_Angeles';\nconst now = DateTime.now().setZone(ZONE);\nconst weekEnd = now.startOf('week');            // this Monday 00:00\nconst weekStart = weekEnd.minus({ weeks: 1 });  // last Monday 00:00\n\n// The Sheet can hand a timestamp back as an ISO string, as formatted text, or as\n// a spreadsheet serial number, depending on how the cell was written. Accept all\n// three rather than silently dropping rows.\nfunction parseWhen(value) {\n  if (value === undefined || value === null || value === '') return null;\n  if (typeof value === 'number') {\n    return DateTime.fromMillis(Math.round((value - 25569) * 86400000), { zone: 'utc' });\n  }\n  const text = String(value).trim();\n  for (const parse of [\n    () => DateTime.fromISO(text, { zone: 'utc' }),\n    () => DateTime.fromSQL(text, { zone: 'utc' }),\n    () => DateTime.fromFormat(text, 'M/d/yyyy H:mm:ss', { zone: 'utc' }),\n  ]) {\n    const when = parse();\n    if (when.isValid) return when;\n  }\n  return null;\n}\n\nfunction inLastWeek(value) {\n  const when = parseWhen(value);\n  return Boolean(when) && when >= weekStart && when < weekEnd;\n}\n\n// Telegram is sent as HTML, so anything a lead typed must be escaped.\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\n// Webhook leads say which platform they came from (\"facebook-ads\"), which is what\n// the owner actually wants to know; form and email are their own source.\nfunction sourceLabel(row) {\n  const source = String(row.source || '').toLowerCase();\n  if (source === 'form') return 'Form';\n  if (source === 'email') return 'Email';\n  const detail = String(row.source_detail || '').trim();\n  const name = detail && detail !== 'unknown' ? detail : source || 'unknown';\n  return name.replace(/[-_]+/g, ' ').replace(/\\b\\w/g, (c) => c.toUpperCase());\n}\n\n// A sheet with no data rows still produces one empty item (alwaysOutputData), so\n// rows without a timestamp are not leads.\nconst leads = $('Read the Lead Log').all()\n  .map((item) => item.json)\n  .filter((row) => inLastWeek(row.received_at));\n\nconst waiting = $('Read the Quarantine tab').all()\n  .map((item) => item.json)\n  .filter((row) => row.failed_at && String(row.status || '').toLowerCase() === 'new');\n\nconst tiers = { hot: 0, warm: 0, cold: 0, unscored: 0 };\nconst sources = {};\nlet returning = 0;\nfor (const row of leads) {\n  // The log writes \"hot (returning)\" for a repeat contact.\n  const tierText = String(row.tier || '').toLowerCase();\n  const tier = Object.keys(tiers).find((t) => tierText.startsWith(t)) || 'unscored';\n  tiers[tier] += 1;\n  if (tierText.includes('returning')) returning += 1;\n  const label = sourceLabel(row);\n  sources[label] = (sources[label] || 0) + 1;\n}\n\nconst topHot = leads\n  .filter((row) => String(row.tier || '').toLowerCase().startsWith('hot'))\n  .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0))\n  .slice(0, 3);\n\nconst lastDay = weekEnd.minus({ days: 1 });\nconst range = weekStart.month === lastDay.month\n  ? `${weekStart.toFormat('MMM d')}–${lastDay.toFormat('d')}`\n  : `${weekStart.toFormat('MMM d')} – ${lastDay.toFormat('MMM d')}`;\n\nconst lines = [`📊 <b>Weekly leads · ${range}</b>`, ''];\n\nif (leads.length === 0) {\n  // Still sent: silence would look the same as a broken workflow.\n  lines.push('No new leads last week.');\n} else {\n  const tierParts = [`🔥 ${tiers.hot} hot`, `${tiers.warm} warm`, `${tiers.cold} cold`];\n  if (tiers.unscored) tierParts.push(`${tiers.unscored} unscored`);\n  lines.push(`<b>${leads.length} lead${leads.length === 1 ? '' : 's'}</b>: ${tierParts.join(' · ')}`);\n  lines.push(Object.entries(sources)\n    .sort((a, b) => b[1] - a[1])\n    .map(([name, count]) => `${esc(name)} ${count}`)\n    .join(' · '));\n  if (returning) lines.push(`🔁 ${returning} from returning contacts`);\n\n  if (topHot.length) {\n    lines.push('', '<b>Top hot leads</b>');\n    topHot.forEach((row, i) => {\n      const who = row.company || [row.first_name, row.last_name].filter(Boolean).join(' ') || row.email;\n      const reason = String(row.reason || '');\n      const short = reason.length > 110 ? reason.slice(0, 107).replace(/\\s+\\S*$/, '') + '…' : reason;\n      lines.push(`${i + 1}. <b>${esc(who)}</b> – ${esc(row.score)}/10${short ? ` – ${esc(short)}` : ''}`);\n    });\n  }\n}\n\nlines.push('');\nlines.push(waiting.length\n  // Crash rows sit here too, not only leads, hence \"items\".\n  ? `⚠️ ${waiting.length} item${waiting.length === 1 ? '' : 's'} waiting in the Quarantine tab`\n  : '✅ Nothing waiting in Quarantine');\n\nreturn [{\n  json: {\n    text: lines.join('\\n'),\n    week_start: weekStart.toISODate(),\n    week_end: lastDay.toISODate(),\n    total: leads.length,\n    tiers,\n    sources,\n    returning,\n    quarantined: waiting.length,\n  },\n}];\n"
+      }
+    },
+    {
+      "id": "318b3989-e106-443c-ad46-6dace24cb7a6",
+      "name": "Send the digest",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        360,
+        0
+      ],
+      "parameters": {
+        "chatId": "636094075",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "tZiGZMjTYIbr0rEc",
+          "name": "Clearwater Leads Bot"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "webhookId": "366ab878-9691-4688-abfa-85851ee9741b"
+    }
+  ],
+  "connections": {
+    "Every Monday 08:00": {
+      "main": [
+        [
+          {
+            "node": "Read the Lead Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the Lead Log": {
+      "main": [
+        [
+          {
+            "node": "Read the Quarantine tab",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the Quarantine tab": {
+      "main": [
+        [
+          {
+            "node": "Count last week",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count last week": {
+      "main": [
+        [
+          {
+            "node": "Send the digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Los_Angeles",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "errorWorkflow": "KRTNj2ZJmaF6lcEt"
+  },
+  "nodeGroups": [],
+  "tags": []
+}

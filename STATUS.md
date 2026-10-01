@@ -1,6 +1,6 @@
 # Where this project stands
 
-Last updated: 2026-09-28 (M8 closed). Read this first when picking the work back up.
+Last updated: 2026-09-29 (M9 closed). Read this first when picking the work back up.
 
 ## Done and tested
 
@@ -14,13 +14,12 @@ Last updated: 2026-09-28 (M8 closed). Read this first when picking the work back
 | M6 | Webhook source | 403 without the key, 202 with it, 400 + quarantine for an unusable payload |
 | M7 | Website form source | Daniel's own submission scored cold 2, correctly, because Herzliya is outside the service area |
 | M8 | Email source | A fresh email to `+leads` (2026-09-28) was read in full: Priya Raman (from the signature), "three evenings a week", Tigard, 4,200 sq ft, hot 9/10 alert with HubSpot link. The From-address fallback now works when the email body has no address (it failed at 12:32 and was fixed; the regex was tested against the real `from` object) |
+| M9 | Weekly summary | Test run on 2026-09-29 posted a real digest to Telegram: 10 leads for Sep 21–27 (7 hot, 3 cold; Form 4, Facebook Ads 3, Email 2, Google Ads 1), top 3 hot leads, 12 Quarantine items. Temporary test webhook removed afterwards |
 
 ## Still to build
 
-Next up is **M9**, which needs Daniel's approval before it starts.
+Next up is **M10**, which needs Daniel's approval before it starts.
 
-- **M9** - weekly summary: Monday 08:00, counts by tier and source from the Lead Log,
-  posted to Telegram.
 - **M10** - export everything and prove it imports into an empty n8n on another port.
 - **Phase 4** - DEMO.md, a reset script, HANDOFF.md.
 
@@ -31,7 +30,8 @@ Next up is **M9**, which needs Daniel's approval before it starts.
 - HubSpot rejects `.example` email domains. The sample leads use `*-demo.com`.
 - Test contacts are in the demo HubSpot: Northwind Legal, Meridian Partners,
   Harbourview Offices, Cedar Park. Clear them before recording.
-- The Lead Log and Quarantine tabs hold test rows. Same.
+- The Lead Log and Quarantine tabs hold test rows. Same. (The weekly digest counts
+  them, so clear them before recording it.)
 - Test emails sent from novizkidaniel@gmail.com show as RETURNING LEAD, because that
   address is already a HubSpot contact. For the recording, send from an address that
   isn't in HubSpot, or clear the contact first.
